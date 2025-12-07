@@ -34,8 +34,7 @@ This repository provides a **RetroPie-Setup module** for [EmulationStation-X (ES
    cd ~/RetroPie-Setup
 Copy the module file into the supplementary scriptmodules folder:
 
-bash
-Copiar código
+   ```bash
 mkdir -p scriptmodules/supplementary
 cd scriptmodules/supplementary
 
@@ -46,8 +45,8 @@ wget https://raw.githubusercontent.com/Renetrox/EmulationStation-X-RetroPie-Modu
 chmod +x emulationstation-es-x.sh
 Run RetroPie-Setup:
 
-bash
-Copiar código
+   ```bash
+
 cd ~/RetroPie-Setup
 sudo ./retropie_setup.sh
 In the menu, go to:
@@ -73,8 +72,8 @@ To remove ES-X using RetroPie-Setup:
 
 Run:
 
-bash
-Copiar código
+   ```bash
+
 cd ~/RetroPie-Setup
 sudo ./retropie_setup.sh
 Go to:
