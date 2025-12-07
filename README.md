@@ -45,8 +45,6 @@ wget https://raw.githubusercontent.com/Renetrox/EmulationStation-X-RetroPie-Modu
 chmod +x emulationstation-es-x.sh
 Run RetroPie-Setup:
 
-   ```bash
-
 cd ~/RetroPie-Setup
 sudo ./retropie_setup.sh
 In the menu, go to:
@@ -71,8 +69,6 @@ Uninstall
 To remove ES-X using RetroPie-Setup:
 
 Run:
-
-   ```bash
 
 cd ~/RetroPie-Setup
 sudo ./retropie_setup.sh
