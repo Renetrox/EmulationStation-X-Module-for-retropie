@@ -7,11 +7,12 @@
 #
 #  This module REPLACES the standard EmulationStation.
 #  Installs ES-X + its language files + default ES-X themes.
+#  Also installs ES-X theme browser previews (esx/theme-previews).
 # ============================================================
 
 rp_module_id="emulationstation-es-x"
 rp_module_desc="EmulationStation-X (ES-X) - Experimental fork with .ini language and theme enhancements (replaces standard EmulationStation)"
-rp_module_help="After installing, ES-X becomes the main frontend. Includes automatic language .ini installation and default ES-X themes."
+rp_module_help="After installing, ES-X becomes the main frontend. Includes automatic language .ini installation, Theme Browser previews, and default ES-X themes."
 rp_module_section="exp"
 rp_module_flags="frontend"
 
@@ -46,24 +47,33 @@ function configure_emulationstation-es-x() {
     configure_emulationstation
 
     # ============================================================
+    # Helper: resolve first existing directory
+    # ============================================================
+    resolve_dir() {
+        local p
+        for p in "$@"; do
+            [[ -d "$p" ]] && { echo "$p"; return 0; }
+        done
+        return 1
+    }
+
+    # ============================================================
     # 3) Install language files (.ini)
     # ============================================================
     echo "Installing ES-X language files..."
 
-    local lang_src=""
     local lang_dst="$home/.emulationstation/lang"
+    local lang_src=""
+    lang_src="$(resolve_dir \
+        "$md_build/lang" \
+        "$md_inst/lang" \
+        "$md_inst/resources/lang" \
+    )"
 
-    if [[ -d "$md_build/lang" ]]; then
-        lang_src="$md_build/lang"
-    elif [[ -d "$md_inst/lang" ]]; then
-        lang_src="$md_inst/lang"
-    elif [[ -d "$md_inst/resources/lang" ]]; then
-        lang_src="$md_inst/resources/lang"
-    fi
-
-    if [[ -n "$lang_src" ]]; then
+    if [[ -n "$lang_src" && -d "$lang_src" ]]; then
         mkUserDir "$lang_dst"
-        cp -v "$lang_src"/* "$lang_dst"/ 2>/dev/null
+        # copy/overwrite (keep it current)
+        cp -uv "$lang_src"/*.ini "$lang_dst"/ 2>/dev/null
         chown -R "$user:$user" "$lang_dst"
         echo "Language files installed at $lang_dst"
     else
@@ -71,13 +81,76 @@ function configure_emulationstation-es-x() {
     fi
 
     # ============================================================
-    # 3.5) Ensure RetroPie music folder exists (NO default music)
+    # 3.25) Install ES-X Theme Browser previews (PNG + INI)
+    #      Copies to: ~/.emulationstation/esx/theme-previews
+    #      - INI files: overwrite/update to keep catalog current
+    #      - Other files (png, folders): merge without deleting user extras
+    # ============================================================
+    echo "Installing ES-X theme previews (Theme Browser)..."
+
+    local esx_root="$home/.emulationstation/esx"
+    local previews_dst="$esx_root/theme-previews"
+    local previews_src=""
+    previews_src="$(resolve_dir \
+        "$md_build/esx/theme-previews" \
+        "$md_inst/esx/theme-previews" \
+        "$md_inst/resources/esx/theme-previews" \
+    )"
+
+    if [[ -n "$previews_src" && -d "$previews_src" ]]; then
+        mkUserDir "$previews_dst"
+
+        # 1) Update catalog INI(s) (overwrite/update)
+        if compgen -G "$previews_src"/*.ini > /dev/null; then
+            cp -uv "$previews_src"/*.ini "$previews_dst"/ 2>/dev/null
+        fi
+
+        # 2) Merge everything else without deleting user extras
+        # Prefer rsync if present; fallback to cp
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a --ignore-existing --exclude="*.ini" "$previews_src"/ "$previews_dst"/ 2>/dev/null
+        else
+            # Merge (won't delete extras; may overwrite less predictably)
+            cp -ruv "$previews_src"/. "$previews_dst"/ 2>/dev/null
+        fi
+
+        # Normalize perms (optional but safe)
+        find "$previews_dst" -type f -exec chmod 644 {} \; 2>/dev/null
+        find "$previews_dst" -type d -exec chmod 755 {} \; 2>/dev/null
+
+        chown -R "$user:$user" "$esx_root"
+        echo "Theme previews installed/updated at $previews_dst"
+    else
+        echo "WARNING: No 'esx/theme-previews' folder found in ES-X source."
+    fi
+
+    # ============================================================
+    # 3.5) Ensure RetroPie music folder exists
+    #      If repo has default music, copy ONLY if destination is empty
     # ============================================================
     echo "Ensuring RetroPie music folder exists..."
     local music_dir="$home/RetroPie/music"
     mkUserDir "$music_dir"
+
+    local music_src=""
+    music_src="$(resolve_dir \
+        "$md_build/music" \
+        "$md_inst/music" \
+        "$md_inst/resources/music" \
+    )"
+
+    if [[ -n "$music_src" && -d "$music_src" ]]; then
+        if [[ -z "$(ls -A "$music_dir" 2>/dev/null)" ]]; then
+            echo "Copying default music (destination was empty)..."
+            cp -ruv "$music_src"/. "$music_dir"/ 2>/dev/null
+        else
+            echo "Music folder already has files — leaving untouched."
+        fi
+    else
+        echo "Music folder ready at $music_dir (no bundled music found)"
+    fi
+
     chown -R "$user:$user" "$music_dir"
-    echo "Music folder ready at $music_dir (empty by design)"
 
     # ============================================================
     # 4) Install / update ES-X themes
