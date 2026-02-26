@@ -24,7 +24,13 @@ rp_module_repo="git https://github.com/Renetrox/EmulationStation-X main"
 # Link to base EmulationStation build system
 # ------------------------------------------------------------
 function _update_hook_emulationstation-es-x() { _update_hook_emulationstation; }
-function depends_emulationstation-es-x()      { depends_emulationstation; }
+
+# ✅ IMPORTANT: ES-X needs SDL2_mixer headers (libsdl2-mixer-dev)
+function depends_emulationstation-es-x() {
+    depends_emulationstation
+    getDepends libsdl2-mixer-dev
+}
+
 function sources_emulationstation-es-x()      { sources_emulationstation; }
 function build_emulationstation-es-x()        { build_emulationstation; }
 function install_emulationstation-es-x()      { install_emulationstation; }
@@ -34,9 +40,9 @@ function install_emulationstation-es-x()      { install_emulationstation; }
 function configure_emulationstation-es-x() {
 
     # ============================================================
-    # 1) Remove standard EmulationStation
+    # 1) Remove standard EmulationStation (if present)
     # ============================================================
-    echo "Removing original EmulationStation..."
+    echo "Removing original EmulationStation (if installed)..."
     rp_callModule "emulationstation" remove
 
     # ============================================================
@@ -63,7 +69,8 @@ function configure_emulationstation-es-x() {
 
     if [[ -n "$lang_src" ]]; then
         mkUserDir "$lang_dst"
-        cp -v "$lang_src"/* "$lang_dst"/ 2>/dev/null
+        # ✅ copy EVERYTHING inside lang/ (files + subfolders), not just plain files
+        cp -av "$lang_src"/. "$lang_dst"/ 2>/dev/null
         chown -R "$user:$user" "$lang_dst"
         echo "Language files installed at $lang_dst"
     else
@@ -95,7 +102,8 @@ function configure_emulationstation-es-x() {
             echo "Checking updates for theme: $folder"
             git -C "$target" fetch --quiet
 
-            if [[ -n "$(git -C "$target" status -uno | grep 'behind')" ]]; then
+            # update only if behind (no merge commits)
+            if git -C "$target" status -uno | grep -q 'behind'; then
                 echo "Updating theme: $folder"
                 git -C "$target" pull --ff-only
             else
@@ -107,7 +115,7 @@ function configure_emulationstation-es-x() {
 
         else
             echo "Cloning theme: $folder"
-            git clone "$repo" "$target"
+            git clone --depth 1 "$repo" "$target"
             chown -R "$user:$user" "$target"
         fi
     }
