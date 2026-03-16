@@ -12,7 +12,7 @@
 
 rp_module_id="emulationstation-es-x"
 rp_module_desc="EmulationStation-X (ES-X) - Experimental fork with .ini language and theme enhancements (replaces standard EmulationStation)"
-rp_module_help="After installing, ES-X becomes the main frontend. Includes automatic language .ini installation, Theme Browser previews, and default ES-X themes."
+rp_module_help="After installing, ES-X becomes the main frontend. Includes automatic language .ini installation, Theme Browser previews, default ES-X theme, and Skyscraper integration."
 rp_module_section="exp"
 rp_module_flags="frontend"
 
@@ -26,7 +26,7 @@ rp_module_repo="git https://github.com/Renetrox/EmulationStation-X main"
 # ------------------------------------------------------------
 function _update_hook_emulationstation-es-x() { _update_hook_emulationstation; }
 
-# ✅ IMPORTANT: ES-X needs SDL2_mixer headers (libsdl2-mixer-dev)
+# ES-X needs SDL2_mixer headers
 function depends_emulationstation-es-x() {
     depends_emulationstation
     getDepends libsdl2-mixer-dev
@@ -53,8 +53,22 @@ function configure_emulationstation-es-x() {
     configure_emulationstation
 
     # ============================================================
-    # Helper: resolve first existing directory
+    # 2.5) Ensure Skyscraper is installed (RetroPie-Setup module)
     # ============================================================
+    echo "Ensuring Skyscraper is installed..."
+    rp_callModule "skyscraper"
+
+    # ============================================================
+    # Helper: resolve first existing directory or file
+    # ============================================================
+    resolve_path() {
+        local p
+        for p in "$@"; do
+            [[ -e "$p" ]] && { echo "$p"; return 0; }
+        done
+        return 1
+    }
+
     resolve_dir() {
         local p
         for p in "$@"; do
@@ -78,20 +92,45 @@ function configure_emulationstation-es-x() {
 
     if [[ -n "$lang_src" && -d "$lang_src" ]]; then
         mkUserDir "$lang_dst"
-        # Copy/merge language files (keep updated)
-        # Prefer rsync if available (copies recursively and only updates changed files)
+
         if command -v rsync >/dev/null 2>&1; then
             rsync -a --update "$lang_src"/ "$lang_dst"/ 2>/dev/null
         else
-            # Fallback: update INI files at least (common case)
             cp -uv "$lang_src"/*.ini "$lang_dst"/ 2>/dev/null
-            # If there are subfolders/files, try a safe recursive merge (may overwrite less predictably)
             cp -ru "$lang_src"/. "$lang_dst"/ 2>/dev/null
         fi
+
         chown -R "$user:$user" "$lang_dst"
         echo "Language files installed at $lang_dst"
     else
         echo "WARNING: No 'lang' folder found for ES-X."
+    fi
+
+    # ============================================================
+    # 3.2) Install ES-X Skyscraper helper script
+    #      Copies to: ~/.emulationstation/scripts/skyscraper-esx.sh
+    # ============================================================
+    echo "Installing ES-X Skyscraper helper script..."
+
+    local scripts_dir="$home/.emulationstation/scripts"
+    local sky_script_src=""
+    local sky_script_dst="$scripts_dir/skyscraper-esx.sh"
+
+    sky_script_src="$(resolve_path \
+        "$md_build/resources/skyscraper-esx.sh" \
+        "$md_inst/resources/skyscraper-esx.sh" \
+        "$md_build/skyscraper-esx.sh" \
+        "$md_inst/skyscraper-esx.sh" \
+    )"
+
+    if [[ -n "$sky_script_src" && -f "$sky_script_src" ]]; then
+        mkUserDir "$scripts_dir"
+        cp -f "$sky_script_src" "$sky_script_dst"
+        chmod 755 "$sky_script_dst"
+        chown "$user:$user" "$sky_script_dst"
+        echo "Skyscraper helper installed at $sky_script_dst"
+    else
+        echo "WARNING: No 'skyscraper-esx.sh' script found in ES-X source."
     fi
 
     # ============================================================
@@ -114,21 +153,16 @@ function configure_emulationstation-es-x() {
     if [[ -n "$previews_src" && -d "$previews_src" ]]; then
         mkUserDir "$previews_dst"
 
-        # 1) Update catalog INI(s) (overwrite/update)
         if compgen -G "$previews_src"/*.ini > /dev/null; then
             cp -uv "$previews_src"/*.ini "$previews_dst"/ 2>/dev/null
         fi
 
-        # 2) Merge everything else without deleting user extras
-        # Prefer rsync if present; fallback to cp
         if command -v rsync >/dev/null 2>&1; then
             rsync -a --ignore-existing --exclude="*.ini" "$previews_src"/ "$previews_dst"/ 2>/dev/null
         else
-            # Merge (won't delete extras; may overwrite less predictably)
             cp -ruv "$previews_src"/. "$previews_dst"/ 2>/dev/null
         fi
 
-        # Normalize perms (optional but safe)
         find "$previews_dst" -type f -exec chmod 644 {} \; 2>/dev/null
         find "$previews_dst" -type d -exec chmod 755 {} \; 2>/dev/null
 
@@ -182,7 +216,6 @@ function configure_emulationstation-es-x() {
             echo "Checking updates for theme: $folder"
             git -C "$target" fetch --quiet
 
-            # update only if behind (no merge commits)
             if git -C "$target" status -uno | grep -q 'behind'; then
                 echo "Updating theme: $folder"
                 git -C "$target" pull --ff-only
@@ -200,9 +233,7 @@ function configure_emulationstation-es-x() {
         fi
     }
 
-    install_esx_theme "https://github.com/Renetrox/art-book-next-ESX" "art-book-next-ESX"
     install_esx_theme "https://github.com/Renetrox/Alekfull-nx-retropie" "Alekfull-nx-retropie"
-    install_esx_theme "https://github.com/Renetrox/Mini" "Mini"
 
     echo "Themes installed."
 
