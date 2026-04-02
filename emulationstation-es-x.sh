@@ -53,10 +53,34 @@ function configure_emulationstation-es-x() {
     configure_emulationstation
 
     # ============================================================
-    # 2.5) Ensure Skyscraper is installed (RetroPie-Setup module)
+    # 2.5) Ensure Skyscraper is installed ONLY if missing
     # ============================================================
-    echo "Ensuring Skyscraper is installed..."
-    rp_callModule "skyscraper"
+    echo "Checking Skyscraper installation..."
+
+    local skyscraper_bin=""
+    skyscraper_bin="$(command -v Skyscraper 2>/dev/null)"
+
+    if [[ -z "$skyscraper_bin" ]]; then
+        # Fallback paths commonly used by RetroPie/manual installs
+        local sky_candidate
+        for sky_candidate in \
+            "/usr/local/bin/Skyscraper" \
+            "/usr/bin/Skyscraper" \
+            "$home/RetroPie-Setup/tmp/build/skyscraper/Skyscraper"
+        do
+            if [[ -x "$sky_candidate" ]]; then
+                skyscraper_bin="$sky_candidate"
+                break
+            fi
+        done
+    fi
+
+    if [[ -n "$skyscraper_bin" && -x "$skyscraper_bin" ]]; then
+        echo "Skyscraper already installed at: $skyscraper_bin"
+    else
+        echo "Skyscraper not found. Installing via RetroPie-Setup module..."
+        rp_callModule "skyscraper"
+    fi
 
     # ============================================================
     # Helper: resolve first existing directory or file
