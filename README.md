@@ -40,8 +40,7 @@ This repository provides a **RetroPie-Setup module** for [EmulationStation-X (ES
    cd scriptmodules/supplementary
 
    # download the module
-   wget https://raw.githubusercontent.com/Renetrox/EmulationStation-X-RetroPie-Module/main/emulationstation-es-x.sh
-
+   wget https://raw.githubusercontent.com/Renetrox/EmulationStation-X-Module-for-retropie/main/emulationstation-es-x.sh
    # make sure it's executable (usually not required, but safe)
    chmod +x emulationstation-es-x.sh
    ```
