@@ -158,6 +158,44 @@ function configure_emulationstation-es-x() {
     fi
 
     # ============================================================
+    # 3.3) Install ES-X artwork.xml for Skyscraper
+    #      Copies to: ~/.skyscraper/artwork.xml
+    #      If one already exists, back it up as artwork.xml.bak
+    # ============================================================
+    echo "Installing ES-X Skyscraper artwork.xml..."
+
+    local sky_cfg_dir="$home/.skyscraper"
+    local artwork_src=""
+    local artwork_dst="$sky_cfg_dir/artwork.xml"
+    local artwork_bak="$sky_cfg_dir/artwork.xml.bak"
+
+    artwork_src="$(resolve_path \
+        "$md_build/resources/artwork.xml" \
+        "$md_inst/resources/artwork.xml" \
+        "$md_build/artwork.xml" \
+        "$md_inst/artwork.xml" \
+    )"
+
+    if [[ -n "$artwork_src" && -f "$artwork_src" ]]; then
+        mkUserDir "$sky_cfg_dir"
+
+        if [[ -f "$artwork_dst" ]]; then
+            echo "Existing artwork.xml found — backing up to artwork.xml.bak"
+            cp -f "$artwork_dst" "$artwork_bak"
+        fi
+
+        cp -f "$artwork_src" "$artwork_dst"
+        chmod 644 "$artwork_dst"
+        [[ -f "$artwork_bak" ]] && chmod 644 "$artwork_bak"
+        chown "$user:$user" "$artwork_dst"
+        [[ -f "$artwork_bak" ]] && chown "$user:$user" "$artwork_bak"
+
+        echo "Skyscraper artwork.xml installed at $artwork_dst"
+    else
+        echo "WARNING: No 'artwork.xml' found in ES-X source."
+    fi
+
+    # ============================================================
     # 3.25) Install ES-X Theme Browser previews (PNG + INI)
     #      Copies to: ~/.emulationstation/esx/theme-previews
     #      - INI files: overwrite/update to keep catalog current
@@ -240,7 +278,11 @@ function configure_emulationstation-es-x() {
             echo "Checking updates for theme: $folder"
             git -C "$target" fetch --quiet
 
-            if git -C "$target" status -uno | grep -q 'behind'; then
+            local local_rev remote_rev
+            local_rev="$(git -C "$target" rev-parse HEAD 2>/dev/null)"
+            remote_rev="$(git -C "$target" rev-parse @{u} 2>/dev/null)"
+
+            if [[ -n "$local_rev" && -n "$remote_rev" && "$local_rev" != "$remote_rev" ]]; then
                 echo "Updating theme: $folder"
                 git -C "$target" pull --ff-only
             else
