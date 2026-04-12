@@ -27,23 +27,32 @@ This repository provides a **RetroPie-Setup module** for [EmulationStation-X (ES
 
 ## Installation
 
-1. Ensure you have a working `RetroPie-Setup` folder:
+Ensure you have a working `RetroPie-Setup` folder:
 
-   ```bash
-   cd ~/RetroPie-Setup
-   ```
+```bash
+cd ~/RetroPie-Setup
+```
 
-2. Copy the module file into the supplementary `scriptmodules` folder:
+Copy the module file into the `supplementary` scriptmodules folder:
 
-   ```bash
-   mkdir -p scriptmodules/supplementary
-   cd scriptmodules/supplementary
+```bash
+mkdir -p scriptmodules/supplementary
+cd scriptmodules/supplementary
 
-   # download the module
-   wget https://raw.githubusercontent.com/Renetrox/EmulationStation-X-RetroPie-Module/main/emulationstation-es-x.sh
+# download the module
+wget -O emulationstation-es-x.sh https://raw.githubusercontent.com/Renetrox/EmulationStation-X-Module-for-retropie/main/emulationstation-es-x.sh
 
-   # make sure it's executable (usually not required, but safe)
-   chmod +x emulationstation-es-x.sh
+# make sure it's executable
+chmod +x emulationstation-es-x.sh
+```
+
+Run RetroPie-Setup:
+
+```bash
+cd ~/RetroPie-Setup
+sudo ./retropie_setup.sh
+```
+
    ```
 
 3. Run RetroPie-Setup:
