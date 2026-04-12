@@ -158,6 +158,61 @@ function configure_emulationstation-es-x() {
     fi
 
     # ============================================================
+    # 3.3) Install ES-X Skyscraper config files
+    #      Copies to: ~/.skyscraper/
+    #      - artwork.xml
+    #      - config.ini
+    #      If one already exists, back it up as .bak
+    # ============================================================
+    echo "Installing ES-X Skyscraper configuration files..."
+
+    local sky_cfg_dir="$home/.skyscraper"
+    mkUserDir "$sky_cfg_dir"
+
+    install_skyscraper_file() {
+        local src="$1"
+        local dst="$2"
+        local bak="${dst}.bak"
+        local label="$3"
+
+        if [[ -n "$src" && -f "$src" ]]; then
+            if [[ -f "$dst" ]]; then
+                echo "Existing $label found — backing up to $(basename "$bak")"
+                cp -f "$dst" "$bak"
+                chmod 644 "$bak"
+                chown "$user:$user" "$bak"
+            fi
+
+            cp -f "$src" "$dst"
+            chmod 644 "$dst"
+            chown "$user:$user" "$dst"
+            echo "$label installed at $dst"
+        else
+            echo "WARNING: No '$label' found in ES-X source."
+        fi
+    }
+
+    local artwork_src=""
+    local sky_config_src=""
+
+    artwork_src="$(resolve_path \
+        "$md_build/resources/artwork.xml" \
+        "$md_inst/resources/artwork.xml" \
+        "$md_build/artwork.xml" \
+        "$md_inst/artwork.xml" \
+    )"
+
+    sky_config_src="$(resolve_path \
+        "$md_build/resources/config.ini" \
+        "$md_inst/resources/config.ini" \
+        "$md_build/config.ini" \
+        "$md_inst/config.ini" \
+    )"
+
+    install_skyscraper_file "$artwork_src" "$sky_cfg_dir/artwork.xml" "artwork.xml"
+    install_skyscraper_file "$sky_config_src" "$sky_cfg_dir/config.ini" "config.ini"
+
+    # ============================================================
     # 3.25) Install ES-X Theme Browser previews (PNG + INI)
     #      Copies to: ~/.emulationstation/esx/theme-previews
     #      - INI files: overwrite/update to keep catalog current
