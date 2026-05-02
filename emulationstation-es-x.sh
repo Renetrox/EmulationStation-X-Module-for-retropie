@@ -158,16 +158,42 @@ function configure_emulationstation-es-x() {
     fi
 
     # ============================================================
-    # 3.3) Install ES-X artwork.xml for Skyscraper
-    #      Copies to: ~/.skyscraper/artwork.xml
-    #      If one already exists, back it up as artwork.xml.bak
+    # 3.3) Install ES-X Skyscraper config files
+    #      Copies to: ~/.skyscraper/
+    #      - artwork.xml
+    #      - config.ini
+    #      If one already exists, back it up as .bak
     # ============================================================
-    echo "Installing ES-X Skyscraper artwork.xml..."
+    echo "Installing ES-X Skyscraper configuration files..."
 
     local sky_cfg_dir="$home/.skyscraper"
+    mkUserDir "$sky_cfg_dir"
+
+    install_skyscraper_file() {
+        local src="$1"
+        local dst="$2"
+        local bak="${dst}.bak"
+        local label="$3"
+
+        if [[ -n "$src" && -f "$src" ]]; then
+            if [[ -f "$dst" ]]; then
+                echo "Existing $label found — backing up to $(basename "$bak")"
+                cp -f "$dst" "$bak"
+                chmod 644 "$bak"
+                chown "$user:$user" "$bak"
+            fi
+
+            cp -f "$src" "$dst"
+            chmod 644 "$dst"
+            chown "$user:$user" "$dst"
+            echo "$label installed at $dst"
+        else
+            echo "WARNING: No '$label' found in ES-X source."
+        fi
+    }
+
     local artwork_src=""
-    local artwork_dst="$sky_cfg_dir/artwork.xml"
-    local artwork_bak="$sky_cfg_dir/artwork.xml.bak"
+    local sky_config_src=""
 
     artwork_src="$(resolve_path \
         "$md_build/resources/artwork.xml" \
@@ -176,24 +202,15 @@ function configure_emulationstation-es-x() {
         "$md_inst/artwork.xml" \
     )"
 
-    if [[ -n "$artwork_src" && -f "$artwork_src" ]]; then
-        mkUserDir "$sky_cfg_dir"
+    sky_config_src="$(resolve_path \
+        "$md_build/resources/config.ini" \
+        "$md_inst/resources/config.ini" \
+        "$md_build/config.ini" \
+        "$md_inst/config.ini" \
+    )"
 
-        if [[ -f "$artwork_dst" ]]; then
-            echo "Existing artwork.xml found — backing up to artwork.xml.bak"
-            cp -f "$artwork_dst" "$artwork_bak"
-        fi
-
-        cp -f "$artwork_src" "$artwork_dst"
-        chmod 644 "$artwork_dst"
-        [[ -f "$artwork_bak" ]] && chmod 644 "$artwork_bak"
-        chown "$user:$user" "$artwork_dst"
-        [[ -f "$artwork_bak" ]] && chown "$user:$user" "$artwork_bak"
-
-        echo "Skyscraper artwork.xml installed at $artwork_dst"
-    else
-        echo "WARNING: No 'artwork.xml' found in ES-X source."
-    fi
+    install_skyscraper_file "$artwork_src" "$sky_cfg_dir/artwork.xml" "artwork.xml"
+    install_skyscraper_file "$sky_config_src" "$sky_cfg_dir/config.ini" "config.ini"
 
     # ============================================================
     # 3.25) Install ES-X Theme Browser previews (PNG + INI)
@@ -278,11 +295,7 @@ function configure_emulationstation-es-x() {
             echo "Checking updates for theme: $folder"
             git -C "$target" fetch --quiet
 
-            local local_rev remote_rev
-            local_rev="$(git -C "$target" rev-parse HEAD 2>/dev/null)"
-            remote_rev="$(git -C "$target" rev-parse @{u} 2>/dev/null)"
-
-            if [[ -n "$local_rev" && -n "$remote_rev" && "$local_rev" != "$remote_rev" ]]; then
+            if git -C "$target" status -uno | grep -q 'behind'; then
                 echo "Updating theme: $folder"
                 git -C "$target" pull --ff-only
             else
