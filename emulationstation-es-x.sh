@@ -5,14 +5,38 @@
 #  Experimental fork with .ini language support + theme system
 #  by Renetrox
 #
-#  This module REPLACES the standard EmulationStation.
-#  Installs ES-X + its language files + default ES-X themes.
-#  Also installs ES-X theme browser previews (esx/theme-previews).
+#  This module installs ES-X as the main EmulationStation frontend.
+#  It uses RetroPie's existing EmulationStation build/install logic,
+#  but fetches the ES-X source instead.
+#
+#  Includes:
+#  - ES-X language files
+#  - Theme Browser previews
+#  - Skyscraper helper script
+#  - Optional Skyscraper configuration files
+#  - ES-X music folders
+#  - Default ES-X theme installation
+#
+#  IMPORTANT:
+#  This module does NOT call:
+#      rp_callModule "emulationstation" remove
+#
+#  ES-X reuses the EmulationStation module logic. Removing the base
+#  module during configure can remove files needed by ES-X itself.
 # ============================================================
 
+# ------------------------------------------------------------
+# RetroPie user compatibility
+# ------------------------------------------------------------
+
+if [[ -z "$__user" ]]; then
+    __user="$SUDO_USER"
+    [[ -z "$__user" ]] && __user="$(id -un)"
+fi
+
 rp_module_id="emulationstation-es-x"
-rp_module_desc="EmulationStation-X (ES-X) - Experimental fork with .ini language and theme enhancements (replaces standard EmulationStation)"
-rp_module_help="After installing, ES-X becomes the main frontend. Includes automatic language .ini installation, Theme Browser previews, default ES-X theme, and Skyscraper integration."
+rp_module_desc="EmulationStation-X (ES-X) - Experimental fork with .ini language and theme enhancements"
+rp_module_help="After installing, ES-X becomes the main frontend.\n\nIncludes:\n- .ini language support\n- Theme Browser previews\n- default ES-X theme\n- Skyscraper integration\n- background music folders\n\nMusic folders:\n$home/RetroPie/music\n$home/.emulationstation/music\n\nRecommended: back up $home/.emulationstation before installing."
 rp_module_section="exp"
 rp_module_flags="frontend"
 
@@ -24,45 +48,321 @@ rp_module_repo="git https://github.com/Renetrox/EmulationStation-X main"
 # ------------------------------------------------------------
 # Link to base EmulationStation build system
 # ------------------------------------------------------------
-function _update_hook_emulationstation-es-x() { _update_hook_emulationstation; }
+
+function _update_hook_emulationstation-es-x() {
+    _update_hook_emulationstation
+}
 
 # ES-X needs SDL2_mixer headers
 function depends_emulationstation-es-x() {
     depends_emulationstation
-    getDepends libsdl2-mixer-dev
+    getDepends libsdl2-mixer-dev rsync
 }
 
-function sources_emulationstation-es-x()      { sources_emulationstation; }
-function build_emulationstation-es-x()        { build_emulationstation; }
-function install_emulationstation-es-x()      { install_emulationstation; }
+function sources_emulationstation-es-x() {
+    sources_emulationstation
+}
+
+function build_emulationstation-es-x() {
+    build_emulationstation
+}
+
+function install_emulationstation-es-x() {
+    install_emulationstation
+}
 
 # ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
 
-function configure_emulationstation-es-x() {
+function esx_resolve_path() {
+    local p
 
-    # ============================================================
-    # 1) Remove standard EmulationStation (if present)
-    # ============================================================
-    echo "Removing original EmulationStation (if installed)..."
-    rp_callModule "emulationstation" remove
+    for p in "$@"; do
+        if [[ -e "$p" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
 
-    # ============================================================
-    # 2) Configure ES-X using upstream logic
-    # ============================================================
-    echo "Configuring ES-X..."
-    configure_emulationstation
+    return 1
+}
 
-    # ============================================================
-    # 2.5) Ensure Skyscraper is installed ONLY if missing
-    # ============================================================
+function esx_resolve_dir() {
+    local p
+
+    for p in "$@"; do
+        if [[ -d "$p" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+function esx_chown() {
+    local target="$1"
+
+    if [[ -n "$target" && -e "$target" ]]; then
+        chown "$__user:$__user" "$target" 2>/dev/null || true
+    fi
+}
+
+function esx_chown_recursive() {
+    local target="$1"
+
+    if [[ -n "$target" && -e "$target" ]]; then
+        chown -R "$__user:$__user" "$target" 2>/dev/null || true
+    fi
+}
+
+function esx_set_es_setting() {
+    local file="$1"
+    local type="$2"
+    local name="$3"
+    local value="$4"
+
+    mkUserDir "$(dirname "$file")"
+
+    if [[ ! -f "$file" ]]; then
+        cat > "$file" <<EOF
+<?xml version="1.0"?>
+<config>
+</config>
+EOF
+    fi
+
+    if ! grep -q "<config>" "$file"; then
+        local backup="${file}.bak.$(date +%Y%m%d-%H%M%S)"
+        cp -f "$file" "$backup"
+
+        cat > "$file" <<EOF
+<?xml version="1.0"?>
+<config>
+</config>
+EOF
+
+        echo "WARNING: Invalid es_settings.cfg detected. Backup created at: $backup"
+    fi
+
+    if grep -q "<$type name=\"$name\"" "$file"; then
+        sed -i "s|<$type name=\"$name\" value=\".*\" */>|<$type name=\"$name\" value=\"$value\" />|g" "$file"
+    else
+        sed -i "s|</config>|    <$type name=\"$name\" value=\"$value\" />\n</config>|" "$file"
+    fi
+
+    esx_chown "$file"
+}
+
+function esx_install_file_with_backup() {
+    local src="$1"
+    local dst="$2"
+    local label="$3"
+
+    if [[ -z "$src" || ! -f "$src" ]]; then
+        echo "WARNING: No '$label' found in ES-X source."
+        return 1
+    fi
+
+    mkUserDir "$(dirname "$dst")"
+
+    if [[ -f "$dst" ]]; then
+        local bak="${dst}.bak.$(date +%Y%m%d-%H%M%S)"
+        echo "Existing $label found — backing up to $(basename "$bak")"
+        cp -f "$dst" "$bak"
+        chmod 644 "$bak"
+        esx_chown "$bak"
+    fi
+
+    cp -f "$src" "$dst"
+    chmod 644 "$dst"
+    esx_chown "$dst"
+
+    echo "$label installed at $dst"
+    return 0
+}
+
+function esx_install_executable() {
+    local src="$1"
+    local dst="$2"
+    local label="$3"
+
+    if [[ -z "$src" || ! -f "$src" ]]; then
+        echo "WARNING: No '$label' found in ES-X source."
+        return 1
+    fi
+
+    mkUserDir "$(dirname "$dst")"
+
+    cp -f "$src" "$dst"
+    chmod 755 "$dst"
+    esx_chown "$dst"
+
+    echo "$label installed at $dst"
+    return 0
+}
+
+# ------------------------------------------------------------
+# ES-X resource installers
+# ------------------------------------------------------------
+
+function esx_install_lang_files() {
+    echo "Installing ES-X language files..."
+
+    local lang_dst="$home/.emulationstation/lang"
+    local lang_src=""
+
+    lang_src="$(esx_resolve_dir \
+        "$md_build/lang" \
+        "$md_build/resources/lang" \
+        "$md_inst/lang" \
+        "$md_inst/resources/lang" \
+    )"
+
+    if [[ -n "$lang_src" && -d "$lang_src" ]]; then
+        mkUserDir "$lang_dst"
+
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a --update "$lang_src"/ "$lang_dst"/ 2>/dev/null
+        else
+            cp -uv "$lang_src"/*.ini "$lang_dst"/ 2>/dev/null || true
+            cp -ru "$lang_src"/. "$lang_dst"/ 2>/dev/null || true
+        fi
+
+        esx_chown_recursive "$lang_dst"
+        echo "Language files installed at $lang_dst"
+    else
+        echo "WARNING: No 'lang' folder found for ES-X."
+    fi
+}
+
+function esx_install_skyscraper_helper() {
+    echo "Installing ES-X Skyscraper helper script..."
+
+    local scripts_dir="$home/.emulationstation/scripts"
+    local sky_script_dst="$scripts_dir/skyscraper-esx.sh"
+    local sky_script_src=""
+
+    sky_script_src="$(esx_resolve_path \
+        "$md_build/resources/skyscraper-esx.sh" \
+        "$md_build/skyscraper-esx.sh" \
+        "$md_inst/resources/skyscraper-esx.sh" \
+        "$md_inst/skyscraper-esx.sh" \
+    )"
+
+    esx_install_executable "$sky_script_src" "$sky_script_dst" "skyscraper-esx.sh"
+}
+
+function esx_install_skyscraper_config() {
+    echo "Installing ES-X Skyscraper configuration files..."
+
+    local sky_cfg_dir="$home/.skyscraper"
+    local artwork_src=""
+    local sky_config_src=""
+
+    mkUserDir "$sky_cfg_dir"
+
+    artwork_src="$(esx_resolve_path \
+        "$md_build/resources/artwork.xml" \
+        "$md_build/artwork.xml" \
+        "$md_inst/resources/artwork.xml" \
+        "$md_inst/artwork.xml" \
+    )"
+
+    sky_config_src="$(esx_resolve_path \
+        "$md_build/resources/config.ini" \
+        "$md_build/config.ini" \
+        "$md_inst/resources/config.ini" \
+        "$md_inst/config.ini" \
+    )"
+
+    esx_install_file_with_backup "$artwork_src" "$sky_cfg_dir/artwork.xml" "artwork.xml"
+    esx_install_file_with_backup "$sky_config_src" "$sky_cfg_dir/config.ini" "config.ini"
+
+    esx_chown_recursive "$sky_cfg_dir"
+}
+
+function esx_install_theme_previews() {
+    echo "Installing ES-X theme previews for Theme Browser..."
+
+    local esx_root="$home/.emulationstation/esx"
+    local previews_dst="$esx_root/theme-previews"
+    local previews_src=""
+
+    previews_src="$(esx_resolve_dir \
+        "$md_build/esx/theme-previews" \
+        "$md_build/resources/esx/theme-previews" \
+        "$md_inst/esx/theme-previews" \
+        "$md_inst/resources/esx/theme-previews" \
+    )"
+
+    if [[ -n "$previews_src" && -d "$previews_src" ]]; then
+        mkUserDir "$previews_dst"
+
+        # INI files are catalog data. Update them.
+        if compgen -G "$previews_src"/*.ini > /dev/null; then
+            cp -uv "$previews_src"/*.ini "$previews_dst"/ 2>/dev/null || true
+        fi
+
+        # Images/folders are merged without deleting user extras.
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a --ignore-existing --exclude="*.ini" "$previews_src"/ "$previews_dst"/ 2>/dev/null
+        else
+            cp -ruv "$previews_src"/. "$previews_dst"/ 2>/dev/null || true
+        fi
+
+        find "$previews_dst" -type f -exec chmod 644 {} \; 2>/dev/null || true
+        find "$previews_dst" -type d -exec chmod 755 {} \; 2>/dev/null || true
+
+        esx_chown_recursive "$esx_root"
+        echo "Theme previews installed/updated at $previews_dst"
+    else
+        echo "WARNING: No 'esx/theme-previews' folder found in ES-X source."
+    fi
+}
+
+function esx_create_music_dirs() {
+    echo "Ensuring ES-X music folders exist..."
+
+    local music_dir_1="$home/RetroPie/music"
+    local music_dir_2="$home/.emulationstation/music"
+    local music_src=""
+
+    mkUserDir "$music_dir_1"
+    mkUserDir "$music_dir_2"
+
+    music_src="$(esx_resolve_dir \
+        "$md_build/music" \
+        "$md_build/resources/music" \
+        "$md_inst/music" \
+        "$md_inst/resources/music" \
+    )"
+
+    if [[ -n "$music_src" && -d "$music_src" ]]; then
+        if [[ -z "$(ls -A "$music_dir_1" 2>/dev/null)" ]]; then
+            echo "Copying bundled default music to $music_dir_1..."
+            cp -ruv "$music_src"/. "$music_dir_1"/ 2>/dev/null || true
+        else
+            echo "Music folder already has files — leaving untouched."
+        fi
+    else
+        echo "No bundled music found. Music folders created only."
+    fi
+
+    esx_chown_recursive "$music_dir_1"
+    esx_chown_recursive "$music_dir_2"
+}
+
+function esx_check_or_install_skyscraper() {
     echo "Checking Skyscraper installation..."
 
     local skyscraper_bin=""
-    skyscraper_bin="$(command -v Skyscraper 2>/dev/null)"
+    skyscraper_bin="$(command -v Skyscraper 2>/dev/null || true)"
 
     if [[ -z "$skyscraper_bin" ]]; then
-        # Fallback paths commonly used by RetroPie/manual installs
         local sky_candidate
+
         for sky_candidate in \
             "/usr/local/bin/Skyscraper" \
             "/usr/bin/Skyscraper" \
@@ -78,268 +378,117 @@ function configure_emulationstation-es-x() {
     if [[ -n "$skyscraper_bin" && -x "$skyscraper_bin" ]]; then
         echo "Skyscraper already installed at: $skyscraper_bin"
     else
-        echo "Skyscraper not found. Installing via RetroPie-Setup module..."
-        rp_callModule "skyscraper"
-    fi
+        echo "Skyscraper not found. Trying to install via RetroPie-Setup module..."
 
-    # ============================================================
-    # Helper: resolve first existing directory or file
-    # ============================================================
-    resolve_path() {
-        local p
-        for p in "$@"; do
-            [[ -e "$p" ]] && { echo "$p"; return 0; }
-        done
-        return 1
-    }
-
-    resolve_dir() {
-        local p
-        for p in "$@"; do
-            [[ -d "$p" ]] && { echo "$p"; return 0; }
-        done
-        return 1
-    }
-
-    # ============================================================
-    # 3) Install language files (.ini)
-    # ============================================================
-    echo "Installing ES-X language files..."
-
-    local lang_dst="$home/.emulationstation/lang"
-    local lang_src=""
-    lang_src="$(resolve_dir \
-        "$md_build/lang" \
-        "$md_inst/lang" \
-        "$md_inst/resources/lang" \
-    )"
-
-    if [[ -n "$lang_src" && -d "$lang_src" ]]; then
-        mkUserDir "$lang_dst"
-
-        if command -v rsync >/dev/null 2>&1; then
-            rsync -a --update "$lang_src"/ "$lang_dst"/ 2>/dev/null
+        if rp_callModule "skyscraper"; then
+            echo "Skyscraper installation completed."
         else
-            cp -uv "$lang_src"/*.ini "$lang_dst"/ 2>/dev/null
-            cp -ru "$lang_src"/. "$lang_dst"/ 2>/dev/null
+            echo "WARNING: Skyscraper could not be installed automatically."
+            echo "ES-X will still be installed, but scraping integration may not work until Skyscraper is installed."
         fi
-
-        chown -R "$user:$user" "$lang_dst"
-        echo "Language files installed at $lang_dst"
-    else
-        echo "WARNING: No 'lang' folder found for ES-X."
     fi
+}
 
-    # ============================================================
-    # 3.2) Install ES-X Skyscraper helper script
-    #      Copies to: ~/.emulationstation/scripts/skyscraper-esx.sh
-    # ============================================================
-    echo "Installing ES-X Skyscraper helper script..."
-
-    local scripts_dir="$home/.emulationstation/scripts"
-    local sky_script_src=""
-    local sky_script_dst="$scripts_dir/skyscraper-esx.sh"
-
-    sky_script_src="$(resolve_path \
-        "$md_build/resources/skyscraper-esx.sh" \
-        "$md_inst/resources/skyscraper-esx.sh" \
-        "$md_build/skyscraper-esx.sh" \
-        "$md_inst/skyscraper-esx.sh" \
-    )"
-
-    if [[ -n "$sky_script_src" && -f "$sky_script_src" ]]; then
-        mkUserDir "$scripts_dir"
-        cp -f "$sky_script_src" "$sky_script_dst"
-        chmod 755 "$sky_script_dst"
-        chown "$user:$user" "$sky_script_dst"
-        echo "Skyscraper helper installed at $sky_script_dst"
-    else
-        echo "WARNING: No 'skyscraper-esx.sh' script found in ES-X source."
-    fi
-
-    # ============================================================
-    # 3.3) Install ES-X Skyscraper config files
-    #      Copies to: ~/.skyscraper/
-    #      - artwork.xml
-    #      - config.ini
-    #      If one already exists, back it up as .bak
-    # ============================================================
-    echo "Installing ES-X Skyscraper configuration files..."
-
-    local sky_cfg_dir="$home/.skyscraper"
-    mkUserDir "$sky_cfg_dir"
-
-    install_skyscraper_file() {
-        local src="$1"
-        local dst="$2"
-        local bak="${dst}.bak"
-        local label="$3"
-
-        if [[ -n "$src" && -f "$src" ]]; then
-            if [[ -f "$dst" ]]; then
-                echo "Existing $label found — backing up to $(basename "$bak")"
-                cp -f "$dst" "$bak"
-                chmod 644 "$bak"
-                chown "$user:$user" "$bak"
-            fi
-
-            cp -f "$src" "$dst"
-            chmod 644 "$dst"
-            chown "$user:$user" "$dst"
-            echo "$label installed at $dst"
-        else
-            echo "WARNING: No '$label' found in ES-X source."
-        fi
-    }
-
-    local artwork_src=""
-    local sky_config_src=""
-
-    artwork_src="$(resolve_path \
-        "$md_build/resources/artwork.xml" \
-        "$md_inst/resources/artwork.xml" \
-        "$md_build/artwork.xml" \
-        "$md_inst/artwork.xml" \
-    )"
-
-    sky_config_src="$(resolve_path \
-        "$md_build/resources/config.ini" \
-        "$md_inst/resources/config.ini" \
-        "$md_build/config.ini" \
-        "$md_inst/config.ini" \
-    )"
-
-    install_skyscraper_file "$artwork_src" "$sky_cfg_dir/artwork.xml" "artwork.xml"
-    install_skyscraper_file "$sky_config_src" "$sky_cfg_dir/config.ini" "config.ini"
-
-    # ============================================================
-    # 3.25) Install ES-X Theme Browser previews (PNG + INI)
-    #      Copies to: ~/.emulationstation/esx/theme-previews
-    #      - INI files: overwrite/update to keep catalog current
-    #      - Other files (png, folders): merge without deleting user extras
-    # ============================================================
-    echo "Installing ES-X theme previews (Theme Browser)..."
-
-    local esx_root="$home/.emulationstation/esx"
-    local previews_dst="$esx_root/theme-previews"
-    local previews_src=""
-    previews_src="$(resolve_dir \
-        "$md_build/esx/theme-previews" \
-        "$md_inst/esx/theme-previews" \
-        "$md_inst/resources/esx/theme-previews" \
-    )"
-
-    if [[ -n "$previews_src" && -d "$previews_src" ]]; then
-        mkUserDir "$previews_dst"
-
-        if compgen -G "$previews_src"/*.ini > /dev/null; then
-            cp -uv "$previews_src"/*.ini "$previews_dst"/ 2>/dev/null
-        fi
-
-        if command -v rsync >/dev/null 2>&1; then
-            rsync -a --ignore-existing --exclude="*.ini" "$previews_src"/ "$previews_dst"/ 2>/dev/null
-        else
-            cp -ruv "$previews_src"/. "$previews_dst"/ 2>/dev/null
-        fi
-
-        find "$previews_dst" -type f -exec chmod 644 {} \; 2>/dev/null
-        find "$previews_dst" -type d -exec chmod 755 {} \; 2>/dev/null
-
-        chown -R "$user:$user" "$esx_root"
-        echo "Theme previews installed/updated at $previews_dst"
-    else
-        echo "WARNING: No 'esx/theme-previews' folder found in ES-X source."
-    fi
-
-    # ============================================================
-    # 3.5) Ensure RetroPie music folder exists
-    #      If repo has default music, copy ONLY if destination is empty
-    # ============================================================
-    echo "Ensuring RetroPie music folder exists..."
-    local music_dir="$home/RetroPie/music"
-    mkUserDir "$music_dir"
-
-    local music_src=""
-    music_src="$(resolve_dir \
-        "$md_build/music" \
-        "$md_inst/music" \
-        "$md_inst/resources/music" \
-    )"
-
-    if [[ -n "$music_src" && -d "$music_src" ]]; then
-        if [[ -z "$(ls -A "$music_dir" 2>/dev/null)" ]]; then
-            echo "Copying default music (destination was empty)..."
-            cp -ruv "$music_src"/. "$music_dir"/ 2>/dev/null
-        else
-            echo "Music folder already has files — leaving untouched."
-        fi
-    else
-        echo "Music folder ready at $music_dir (no bundled music found)"
-    fi
-
-    chown -R "$user:$user" "$music_dir"
-
-    # ============================================================
-    # 4) Install / update ES-X themes
-    # ============================================================
-    echo "Installing ES-X themes..."
+function esx_install_theme() {
+    local repo="$1"
+    local folder="$2"
     local themes_dir="$home/.emulationstation/themes"
+    local target="$themes_dir/$folder"
+
     mkUserDir "$themes_dir"
 
-    install_esx_theme() {
-        local repo="$1"
-        local folder="$2"
-        local target="$themes_dir/$folder"
+    if [[ -d "$target/.git" ]]; then
+        echo "Checking updates for theme: $folder"
 
-        if [[ -d "$target/.git" ]]; then
-            echo "Checking updates for theme: $folder"
-            git -C "$target" fetch --quiet
+        git -C "$target" fetch --quiet
 
-            if git -C "$target" status -uno | grep -q 'behind'; then
-                echo "Updating theme: $folder"
-                git -C "$target" pull --ff-only
-            else
-                echo "Theme already up to date: $folder"
-            fi
-
-        elif [[ -d "$target" ]]; then
-            echo "Theme folder exists but is not a git repository: $folder — leaving untouched."
-
+        if git -C "$target" status -uno | grep -q "behind"; then
+            echo "Updating theme: $folder"
+            git -C "$target" pull --ff-only
         else
-            echo "Cloning theme: $folder"
-            git clone --depth 1 "$repo" "$target"
-            chown -R "$user:$user" "$target"
+            echo "Theme already up to date: $folder"
         fi
-    }
 
-    install_esx_theme "https://github.com/Renetrox/Alekfull-nx-retropie" "Alekfull-nx-retropie"
+        esx_chown_recursive "$target"
+
+    elif [[ -d "$target" ]]; then
+        echo "Theme folder exists but is not a git repository: $folder — leaving untouched."
+
+    else
+        echo "Cloning theme: $folder"
+
+        if git clone --depth 1 "$repo" "$target"; then
+            esx_chown_recursive "$target"
+        else
+            echo "WARNING: Could not clone theme: $folder"
+        fi
+    fi
+}
+
+function esx_install_default_themes() {
+    echo "Installing ES-X themes..."
+
+    esx_install_theme "https://github.com/Renetrox/Alekfull-nx-retropie" "Alekfull-nx-retropie"
 
     echo "Themes installed."
+}
 
-    # ============================================================
-    # 5) Apply default theme ONLY on first install
-    # ============================================================
+function esx_apply_default_settings() {
+    echo "Applying ES-X default settings if needed..."
+
     local es_settings="$home/.emulationstation/es_settings.cfg"
+    local default_theme="Alekfull-nx-retropie"
 
     if [[ ! -f "$es_settings" ]] || ! grep -q "<string name=\"ThemeSet\"" "$es_settings"; then
-        echo "Applying default ES-X theme: Alekfull-nx-retropie"
-
-        mkUserDir "$(dirname "$es_settings")"
-        touch "$es_settings"
-
-        if grep -q "<string name=\"ThemeSet\"" "$es_settings"; then
-            sed -i 's|<string name="ThemeSet".*|<string name="ThemeSet" value="Alekfull-nx-retropie" />|' "$es_settings"
+        if [[ -d "$home/.emulationstation/themes/$default_theme" ]]; then
+            echo "Applying default ES-X theme: $default_theme"
+            esx_set_es_setting "$es_settings" "string" "ThemeSet" "$default_theme"
         else
-            echo '<string name="ThemeSet" value="Alekfull-nx-retropie" />' >> "$es_settings"
+            echo "Default theme '$default_theme' was not found. Leaving ThemeSet unchanged."
         fi
-
-        chown "$user:$user" "$es_settings"
     else
         echo "Theme already configured by user — not changing."
     fi
 
+    # If IMP is installed, avoid two background music systems fighting.
+    if [[ -d "/opt/retropie/configs/imp" ]] || [[ -d "$home/imp" ]]; then
+        echo "IMP found. Disabling ES-X built-in background music."
+        esx_set_es_setting "$es_settings" "bool" "BackgroundMusic" "false"
+    fi
+}
+
+# ------------------------------------------------------------
+# Configure
+# ------------------------------------------------------------
+
+function configure_emulationstation-es-x() {
+    echo "Configuring EmulationStation-X..."
+
+    # Do NOT remove the original emulationstation module here.
+    # ES-X reuses the base EmulationStation install/configure logic.
+    echo "Running base EmulationStation configure logic..."
+    configure_emulationstation
+
+    esx_check_or_install_skyscraper
+    esx_install_lang_files
+    esx_install_skyscraper_helper
+    esx_install_skyscraper_config
+    esx_install_theme_previews
+    esx_create_music_dirs
+    esx_install_default_themes
+    esx_apply_default_settings
+
     echo "ES-X configuration complete."
 }
 
-function remove_emulationstation-es-x() { remove_emulationstation; }
-function gui_emulationstation-es-x()    { gui_emulationstation; }
+# ------------------------------------------------------------
+# Remove / GUI
+# ------------------------------------------------------------
+
+function remove_emulationstation-es-x() {
+    remove_emulationstation
+}
+
+function gui_emulationstation-es-x() {
+    gui_emulationstation
+}
