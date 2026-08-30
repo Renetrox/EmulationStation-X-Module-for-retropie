@@ -491,6 +491,9 @@ function esx_apply_default_settings() {
 # ------------------------------------------------------------
 
 function configure_emulationstation-es-x() {
+    if [[ "$md_mode" == "remove" ]]; then
+        return
+    fi
     echo "Configuring EmulationStation-X..."
 
     # Do NOT remove the original emulationstation module here.
