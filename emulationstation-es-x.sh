@@ -517,8 +517,9 @@ if action == "install":
     if not pathlib.Path(backend).is_file():
         sys.exit("ES-X: decoration backend missing; hook unchanged")
     # An existing manual integration belongs to the user.
-    if b"retropie-decorations.py" in body or b"BEGIN TARAVE DECORATIONS" in body:
-        print("ES-X: existing manual decoration hook preserved")
+    # ES-X uses its own environment variables; existing Tarave hooks are independent.
+    if b"ESX_DECORATION" in body:
+        print("ES-X: existing ES-X decoration hook preserved")
         sys.exit(0)
     if body.startswith(b"#!") and b"\n" not in body:
         body += b"\n"
@@ -529,7 +530,7 @@ if action == "install":
         first += b"\n"
     else:
         first, rest = b"", body
-    block = ("if [ -n \"${TARAVE_DECORATION:-}\" ]; then\n"
+    block = ("if [ -n \"${ESX_DECORATION:-}\" ]; then\n"
              "    python3 " + shlex.quote(backend) + " \"$@\" || :\n"
              "fi\n").encode()
     body = first + begin + block + end + rest
@@ -555,6 +556,9 @@ function esx_configure_decorations() {
     local dst="/opt/retropie/configs/all/esx-retropie-decorations.py"
     if [[ -f "$src" ]]; then
         install -m 755 -- "$src" "$dst" || return 1
+    elif [[ ! -f "$dst" ]]; then
+        echo "ES-X: source backend unavailable; run source installation first." >&2
+        return 1
     fi
     [[ -f "$dst" ]] || return 1
     mkUserDir "$home/RetroPie/Overlays"
